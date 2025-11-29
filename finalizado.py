@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[15]:
+# In[25]:
 
 
 import pandas as pd
@@ -11,13 +11,14 @@ import glob
 from pathlib import Path
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
+from pathlib import Path
 pd.set_option('display.expand_frame_repr', False)  # Evita que las filas se dividan
 pd.set_option('display.max_columns', None)  # Muestra todas las columnas
 
 
 # ## Obtencion de las rutas de los archivos implicados
 
-# In[2]:
+# In[26]:
 
 
 wb = load_workbook('config.xlsx')
@@ -32,7 +33,7 @@ print(excelListaPreciosLG)
 
 # ## Funciones
 
-# In[8]:
+# In[27]:
 
 
 # Funcion que Procesara el excel de Lista precio 
@@ -131,7 +132,7 @@ def procesarExcelListaPrecio(ruta_excel, nombre_hoja):
     return df_final
 
 
-# In[9]:
+# In[28]:
 
 
 # Funcion que Procesara el excel de lista precios LG
@@ -263,7 +264,7 @@ def procesarExcelListaPrecio_LG(ruta_excel, nombre_hoja):
     return df_final
 
 
-# In[23]:
+# In[29]:
 
 
 # Funcion que Procesara los datos del excel de CRM en la hoja CRM
@@ -353,7 +354,7 @@ def procesarCRM(path, hoja_principal="Base CRM", hoja_backup="Hoja1"):
 
 # ## Creacion de consolidado de Lista precios
 
-# In[10]:
+# In[30]:
 
 
 # Usamos la funcion para crear el dataframe de lista productos con el excel lista productos
@@ -371,7 +372,7 @@ sd['COSTO COMPASS'] = sd['COSTO COMPASS'].fillna(0)
 resExcel1 = sd.copy()
 
 
-# In[11]:
+# In[31]:
 
 
 # Usamos la funcion para crear el dataframe de lista productos con el excel lista productos Lg
@@ -379,7 +380,7 @@ resExcel2 = procesarExcelListaPrecio_LG(excelListaPreciosLG, 'RESUMEN GENERAL LG
 resExcel2 = resExcel2.rename(columns={'CÓDIGO':'CÓDIGO','DESCRIPCION':'NOMBRE COMERCIAL'})
 
 
-# In[18]:
+# In[32]:
 
 
 # Unimos ambos dataframe en uno solo
@@ -388,11 +389,87 @@ dfExcel2 = resExcel2.copy()
 dfFinalListaPrecios = pd.concat([dfExel1,dfExcel2])
 
 
-# In[19]:
+# ## Creacion de consolidacion de CRM y Cierre
+
+# In[33]:
+
+
+# Creamos un arreglo con lo excel filtrados
+carpeta = Path(rutaExcelCRM) 
+archivo = list(carpeta.rglob("CRM*.xlsx")) + list(carpeta.glob("CRM*.xls")) # se filtra por CRM xlsx u xls
+archivos_str = [str(a) for a in archivo] # retorna un array ['xxx','xxxx',...]de las ruta de los archivos
+archivos_str
+
+
+# In[34]:
+
+
+# Usamos la funcion de ProcesarCRM
+archivo_lectura = []
+# archivo_cierre = []
+for archivo  in archivos_str:
+    df_1 = procesarCRM(archivo, hoja_principal="Base CRM", hoja_backup="CRM")
+    if df_1 is None:
+        continue
+    archivo_lectura.append(df_1)
+
+dfFinalConsolidadoCRM = pd.concat(archivo_lectura, ignore_index=True) # creamos un dataframe 
+
+
+# In[35]:
+
+
+# Procesamo para la creacion del consolidado Cierre
+datosCierre = []
+for archivo in archivos_str:
+    # desarrollo de cierre
+    claves = ['No.','Fecha','Asesor','Razon Social','RUC']
+    pattern = "|".join(claves)
+    dfCierre = pd.read_excel(archivo, sheet_name='CIERRE', header=None)
+
+    # Buscar fila donde están los encabezados
+    filaCierre = dfCierre.index[
+        dfCierre.apply(lambda row: row.astype(str).str.contains(pattern, case=False).any(), axis=1)
+    ][0]
+
+    print("Fila encontrada:", filaCierre)
+
+    # Cargar excel usando esa fila como encabezado
+    df_final = pd.read_excel(
+        archivo,
+        sheet_name='CIERRE',
+        header=filaCierre
+    )
+
+    datosCierre.append(df_final)
+
+dfCierres = pd.concat(datosCierre, ignore_index=True)
+
+
+# In[36]:
+
+
+# Hacemos un cruce con el dataframe del consolidado de lista Precios
+dfFinalCierre = pd.merge(dfCierres, dfFinalListaPrecios, left_on="Código", right_on="CÓDIGO", how='left')
+dfFinalCierre = dfFinalCierre.drop(columns={'CÓDIGO','NOMBRE COMERCIAL','Costo','Costos','fecha'}).rename(columns={'COSTO COMPASS':'Costo'})
+print(dfFinalCierre)
+
+
+# ## Creamos los Excel
+
+# In[37]:
+
+
+carpeta = Path("Reportes")
+carpeta.mkdir(exist_ok=True)
+
+
+# In[38]:
 
 
 # Creamos el excel de de lista precios.
-with pd.ExcelWriter("concatenacion_base_precios_1.xlsx", engine="openpyxl") as writer:
+ruta_Precios = carpeta / "ConsolidadoPrecios.xlsx"
+with pd.ExcelWriter(ruta_Precios, engine="openpyxl") as writer:
     dfFinalListaPrecios.to_excel(writer, index=False)
     wb = writer.book
     ws = writer.sheets['Sheet1']
@@ -432,76 +509,11 @@ with pd.ExcelWriter("concatenacion_base_precios_1.xlsx", engine="openpyxl") as w
         ws.column_dimensions[column].width = max_length + 2
 
 
-# ## Creacion de consolidacion de CRM y Cierre
-
-# In[21]:
+# In[39]:
 
 
-# Creamos un arreglo con lo excel filtrados
-carpeta = Path(rutaExcelCRM) 
-archivo = list(carpeta.rglob("CRM*.xlsx")) + list(carpeta.glob("CRM*.xls")) # se filtra por CRM xlsx u xls
-archivos_str = [str(a) for a in archivo] # retorna un array ['xxx','xxxx',...]de las ruta de los archivos
-archivos_str
-
-
-# In[27]:
-
-
-# Usamos la funcion de ProcesarCRM
-archivo_lectura = []
-# archivo_cierre = []
-for archivo  in archivos_str:
-    df_1 = procesarCRM(archivo, hoja_principal="Base CRM", hoja_backup="CRM")
-    if df_1 is None:
-        continue
-    archivo_lectura.append(df_1)
-
-dfFinalConsolidadoCRM = pd.concat(archivo_lectura, ignore_index=True) # creamos un dataframe 
-
-
-# In[ ]:
-
-
-# Procesamo para la creacion del consolidado Cierre
-datosCierre = []
-for archivo in archivos_str:
-    # desarrollo de cierre
-    claves = ['No.','Fecha','Asesor','Razon Social','RUC']
-    pattern = "|".join(claves)
-    dfCierre = pd.read_excel(archivo, sheet_name='CIERRE', header=None)
-
-    # Buscar fila donde están los encabezados
-    filaCierre = dfCierre.index[
-        dfCierre.apply(lambda row: row.astype(str).str.contains(pattern, case=False).any(), axis=1)
-    ][0]
-
-    print("Fila encontrada:", filaCierre)
-
-    # Cargar excel usando esa fila como encabezado
-    df_final = pd.read_excel(
-        archivo,
-        sheet_name='CIERRE',
-        header=filaCierre
-    )
-
-    datosCierre.append(df_final)
-
-dfCierres = pd.concat(datosCierre, ignore_index=True)
-
-
-# In[44]:
-
-
-# Hacemos un cruce con el dataframe del consolidado de lista Precios
-dfFinalCierre = pd.merge(dfCierres, dfFinalListaPrecios, left_on="Código", right_on="CÓDIGO", how='left')
-dfFinalCierre = dfFinalCierre.drop(columns={'CÓDIGO','NOMBRE COMERCIAL','Costo','Costos','fecha'}).rename(columns={'COSTO COMPASS':'Costo'})
-print(dfFinalCierre)
-
-
-# In[45]:
-
-
-with pd.ExcelWriter("ConsolidadoCierreCrm.xlsx", engine='openpyxl') as writer:
+ruta_CierreCRM = carpeta / "ConsolidadoCierreCrm.xlsx"
+with pd.ExcelWriter(ruta_CierreCRM, engine='openpyxl') as writer:
 
     dfFinalConsolidadoCRM.to_excel(writer, sheet_name="CRM", index=False)
     dfFinalCierre.to_excel(writer, sheet_name="CIERRE", index=False)
